@@ -8,63 +8,84 @@ import (
 //Counter Interface to implements a Counter
 type Counter interface {
 	Increment() int
-	Decrement() int
+	StopExpire()
+	Values() []time.Time
+	RestoreState([]time.Time)
 }
 
-// CounterRequest Struct a concurrency safe for count request
+//CounterRequest Struct a concurrency safe for count request
 type CounterRequest struct {
-	Accumulator []time.Time `json:accumulator`
-	sync.Mutex
-	expiration time.Duration
+	Accumulator []time.Time
+	expiration  time.Duration
+	ticker      *time.Ticker
+	stop        chan struct{}
+	sync.RWMutex
 }
 
 //Increment Add 1 to Accumulator
 func (c *CounterRequest) Increment() int {
-	c.Lock()
-	defer c.Unlock()
-	c.Accumulator = append(c.Accumulator, time.Now().Add(c.expiration))
+	c.append(time.Now().Add(c.expiration))
+	c.RLock()
+	defer c.RUnlock()
 	return len(c.Accumulator)
 }
 
-//Decrement remove first register from Accumulator
-func (c *CounterRequest) Decrement() int {
-	c.Lock()
-	defer c.Unlock()
-	c.Accumulator = c.Accumulator[1:len(c.Accumulator)]
-	return len(c.Accumulator)
+//Values retrieve slice from Accumulator
+func (c *CounterRequest) Values() (acc []time.Time) {
+	c.RLock()
+	defer c.RUnlock()
+	acc = c.Accumulator
+	return acc
 }
 
-//Len retrieve length from Accumulator
-func (c *CounterRequest) len() int {
-	c.Lock()
-	defer c.Unlock()
-	return len(c.Accumulator)
+//SetState Set a previous state to Accumulator
+func (c *CounterRequest) SetState(t []time.Time) {
+	c.append(t...)
 }
 
-func (c *CounterRequest) firstIsExpired() bool {
+//StopExpire Stops expires
+func (c *CounterRequest) StopExpire() {
+	c.stop <- struct{}{}
+}
+
+func (c *CounterRequest) removeExpireds() {
 	c.Lock()
 	defer c.Unlock()
-	if len(c.Accumulator) > 0 && c.Accumulator[0].Before(time.Now()) {
-		return true
+	y := c.Accumulator[:0]
+	for _, n := range c.Accumulator {
+		if n.After(time.Now()) {
+			y = append(y, n)
+		}
 	}
-	return false
+	c.Accumulator = y
 }
 
 // WithExpiration add expirationTime to CounterRequest and Decrement when is expired
-func (c *CounterRequest) withExpiration(expirationTime time.Duration) {
-	c.expiration = expirationTime
+func (c *CounterRequest) withExpiration() {
+	c.stop = make(chan struct{})
 	go func() {
 		for {
-			if c.firstIsExpired() {
-				c.Decrement()
+			select {
+			case <-c.ticker.C:
+				c.removeExpireds()
+			case <-c.stop:
+				c.ticker.Stop()
 			}
 		}
 	}()
 }
 
+func (c *CounterRequest) append(t ...time.Time) {
+	c.Lock()
+	c.Accumulator = append(c.Accumulator, t...)
+	c.Unlock()
+}
+
 //NewCounterRequest Returns a pointer to CounterRequest with a expiration time
-func NewCounterRequest(expiration time.Duration) *CounterRequest {
+func NewCounterRequest(expiration time.Duration, ticker *time.Ticker) *CounterRequest {
 	c := &CounterRequest{}
-	c.withExpiration(expiration)
+	c.ticker = ticker
+	c.expiration = expiration
+	c.withExpiration()
 	return c
 }

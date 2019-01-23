@@ -9,8 +9,8 @@ import (
 func TestCounterRequest(t *testing.T) {
 	t.Run("Increment into counter", func(t *testing.T) {
 		expected := 1
-
-		counter := NewCounterRequest(time.Minute)
+		ticker := time.NewTicker(time.Millisecond)
+		counter := NewCounterRequest(time.Minute, ticker)
 		acc := counter.Increment()
 
 		if acc != expected {
@@ -18,62 +18,70 @@ func TestCounterRequest(t *testing.T) {
 		}
 	})
 
-	t.Run("Decrement from counter", func(t *testing.T) {
-		expected := 1
-
-		counter := NewCounterRequest(time.Minute)
-		counter.Increment()
-		counter.Increment()
-		counter.Decrement()
-
-		if counter.len() != expected {
-			t.Errorf("The length is diferent, expected %v Actual %v", expected, counter.len())
-		}
-	})
-
 	t.Run("Increment into counter concurrently", func(t *testing.T) {
 		expected := 10
-		counter := NewCounterRequest(time.Minute)
+		ticker := time.NewTicker(time.Millisecond)
+		counter := NewCounterRequest(time.Minute, ticker)
 
 		waitIncrement := executFuncWithGoRoutines(counter.Increment, expected)
 		waitIncrement()
 
-		length := counter.len()
-		if length != expected {
-			t.Errorf("The length is diferent, expected %v Actual %v", expected, length)
-		}
-	})
-
-	t.Run("Decrement from counter concurrently", func(t *testing.T) {
-		expected := 0
-		counter := NewCounterRequest(time.Minute)
-
-		createIncrementDecrementWG(counter, 10)
-		length := counter.len()
+		length := len(counter.Values())
 		if length != expected {
 			t.Errorf("The length is diferent, expected %v Actual %v", expected, length)
 		}
 	})
 
 	t.Run("Decrement after expiration time", func(t *testing.T) {
-		expected := 0
-		counter := NewCounterRequest(time.Millisecond)
-		counter.Increment()
-		counter.Increment()
-		time.Sleep(time.Millisecond * 3)
-		length := counter.len()
+		expected := 1
+		future := time.Now().Add(time.Minute)
+		past := time.Date(2017, 06, 1, 1, 1, 06, 66666, time.UTC)
+
+		ticker := time.NewTicker(time.Nanosecond)
+		counter := NewCounterRequest(time.Millisecond, ticker)
+		counter.append(past)
+		counter.append(future)
+
+		time.Sleep(time.Millisecond)
+
+		length := len(counter.Values())
 		if length != expected {
 			t.Errorf("The length is diferent, expected %v Actual %v", expected, length)
 		}
 	})
 
-}
+	t.Run("Restore state", func(t *testing.T) {
+		expected := 2
+		ticker := time.NewTicker(time.Millisecond)
+		counter := NewCounterRequest(time.Millisecond, ticker)
+		past := time.Date(2017, 06, 1, 1, 1, 06, 66666, time.UTC)
+		future := time.Now().Add(time.Second)
+		storaged := []time.Time{past, future}
+		counter.SetState(storaged)
 
-func createIncrementDecrementWG(counter *CounterRequest, times int) {
-	waitIncrement := executFuncWithGoRoutines(counter.Increment, times)
-	defer waitIncrement()
-	waitDecrement := executFuncWithGoRoutines(counter.Decrement, times)
-	defer waitDecrement()
+		length := len(counter.Values())
+		if length != expected {
+			t.Errorf("The length is diferent, expected %v Actual %v", expected, length)
+		}
+	})
+
+	t.Run("Stop Decrement after call Stop func", func(t *testing.T) {
+		expected := 2
+		ticker := time.NewTicker(time.Millisecond)
+
+		counter := NewCounterRequest(time.Millisecond, ticker)
+		past := time.Date(2017, 06, 1, 1, 1, 06, 66666, time.UTC)
+		future := time.Now().Add(time.Second)
+		counter.append(past, future)
+
+		counter.StopExpire()
+		time.Sleep(time.Millisecond)
+
+		length := len(counter.Values())
+		if length != expected {
+			t.Errorf("The length is diferent, expected %v Actual %v", expected, length)
+		}
+	})
 }
 
 func executFuncWithGoRoutines(function func() int, times int) func() {
