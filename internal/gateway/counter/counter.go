@@ -10,7 +10,7 @@ type Counter interface {
 	Increment() int
 	StopExpire()
 	Values() []time.Time
-	RestoreState([]time.Time)
+	SetState([]time.Time)
 }
 
 //CounterRequest Struct a concurrency safe for count request
