@@ -34,13 +34,16 @@ func (c *CounterRequest) Increment() int {
 func (c *CounterRequest) Values() (acc []time.Time) {
 	c.RLock()
 	defer c.RUnlock()
-	acc = c.Accumulator
-	return acc
+	cpy := make([]time.Time, len(c.Accumulator))
+	copy(cpy, c.Accumulator)
+	return cpy
 }
 
 //SetState Set a previous state to Accumulator
 func (c *CounterRequest) SetState(t []time.Time) {
-	c.append(t...)
+	if len(t) > 0 {
+		c.append(t...)
+	}
 }
 
 //StopExpire Stops expires
